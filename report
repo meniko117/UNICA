@@ -1,0 +1,100 @@
+import pandas as pd
+import getpass
+import re
+import datetime
+from datetime import datetime
+from datetime import timedelta, date
+
+# скачиваем справочник- список интересующих кодов
+df_all_codes = pd.read_csv('C:/Users/Maksim.Smirnov/OneDrive - Unilever/Documents/Проекты/UNICA/codes_UNICA.csv', header = None, names = ['Product'])
+
+#df_all_codes['Product'] = df_all_codes['Product'].apply(str)
+
+sys_user = getpass.getuser()  
+# путь, где будет лежать файл-справочник с позициями
+path =  r"C:\Users" + "\\ ".strip() + sys_user + "\\ ".strip() + "python_SAP_scripting" + "\\ ".strip()+ "ZRGSNP_009" + "\\ ".strip()
+
+
+# создаем переменные с номерами текущей и предыдущей недели
+current_week_number = datetime.today().isocalendar()[1]  
+prev_week_number = (date.today() - timedelta(days=7)).isocalendar()[1]
+
+
+
+ 
+# загружаем файл c данными за текущую неделю
+df_report_current = pd.read_excel(path + "w" +str(current_week_number)+ '_ZRGSNP_009.xls') #
+
+list_of_weeks_current_report =[i for i in df_report_current.columns.tolist() if '.2' in i]
+
+
+
+# загружаем файл c данными за предыдущую неделю
+df_report_previous = pd.read_excel(path + "w" +str(prev_week_number)+ '_ZRGSNP_009.xls') #
+list_of_weeks_prev_report =[i for i in df_report_previous.columns.tolist() if '.2' in i]
+
+
+
+# создаем полный список недель из отчета за текущую и предыдущую недели без дублей
+total_list_of_weeks = list(dict.fromkeys(list_of_weeks_current_report + list_of_weeks_prev_report))
+
+# создаем пустую таблицу, где колонки имеют названия недель периода, захватывающего обе таблицы с входными данными
+df_list_of_weeks = pd.DataFrame(columns=total_list_of_weeks)
+
+
+
+
+# функция, преобразующая иходный отчет в отчет по шаблону, где присутствуют все коды (из полного справочника) и все номера недель из обоих отчетов
+
+
+def make_full_report (report, df_all_codes, df_list_of_weeks):
+    # оставляем только данные с "Total Demand"
+    df_report = report[ report['Key Figure/Week']== 'Total Demand']
+    
+    #привели таблицу в соответствие с полным перечнем позиций (в иходном отчете могут быть не все позиции)
+    df_report_all_codes = pd.merge(df_all_codes, df_report, how='left',  on = 'Product')
+    df_report_all_weeks_codes = pd.concat([df_list_of_weeks, df_report_all_codes], axis=0)
+    
+    
+    df_report_all_weeks_codes['Product'] = df_report_all_weeks_codes['Product'].astype(int)
+
+    #меняем колонки местами
+    cols_to_order = ['MPS Category', 'Location', 'Product']
+    new_columns = cols_to_order + (df_report_all_weeks_codes.columns.drop(cols_to_order).tolist())
+    df_report_all_weeks_codes = df_report_all_weeks_codes[new_columns]    
+
+    df_report_all_weeks_codes = df_report_all_weeks_codes.iloc[:, :(3+len(total_list_of_weeks))]
+    
+    return df_report_all_weeks_codes
+
+
+# применяем функцию к формированию отчета по шаблону    
+df_report_current_week =  make_full_report  (df_report_current, df_all_codes, df_list_of_weeks)
+
+
+df_report_prev_week =  make_full_report  (df_report_previous, df_all_codes, df_list_of_weeks)
+
+
+ 
+# название файл без расширения
+def get_week_num_cur(x):
+        return x.split('.')[0] + '_текущ'
+    
+def get_week_num_prev(x):
+        return x.split('.')[0] + '_prev'    
+    
+df_report_current_week.columns.values[3:] = list(map(get_week_num_cur, list(df_report_current_week.columns)[3:])) 
+df_report_prev_week.columns.values[3:] = list(map(get_week_num_prev, list(df_report_prev_week.columns)[3:]))
+
+
+
+df_report_final = df_report_current_week.iloc[:, :3]
+
+for i in range (3, df_report_current_week.shape[1]):
+    frames = [df_report_final, df_report_current_week.iloc[:, [i]], df_report_prev_week.iloc[:, [i]]]
+    df_report_final= pd.concat( frames, axis =1)
+    df_report_final ['Difference %' + str(i)] =   (df_report_final.iloc[:,-2]-df_report_final.iloc[:,-1])/df_report_final.iloc[:,-1]
+    
+
+    
+
