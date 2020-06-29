@@ -4,6 +4,7 @@ import re
 import datetime
 from datetime import datetime
 from datetime import timedelta, date
+import xlsxwriter
 
 # скачиваем справочник- список интересующих кодов
 df_all_codes = pd.read_csv('C:/Users/Maksim.Smirnov/OneDrive - Unilever/Documents/Проекты/UNICA/codes_UNICA.csv', header = None, names = ['Product'])
@@ -83,8 +84,66 @@ def get_week_num_cur(x):
 def get_week_num_prev(x):
         return x.split('.')[0] + '_prev'    
     
+    
+    
+    
+# фнукция для получения номера месяца из даты    
+import datetime
+
+def get_week_num(x):
+        return datetime.datetime.strptime(x + '-1', "W%W.%Y-%w").strftime('%m')
+    
+##############################################################################################
+# делаем заготовку для помесячного отчета на основе текущей версии  
+df_report_current_week_monthly  = df_report_current_week  
+df_report_current_week_monthly.columns.values[3:] = list(map(get_week_num, list(df_report_current_week_monthly.columns)[3:]))     
+
+# делаем заготовку для помесячного отчета на основе предыдущей версии     
+df_report_prev_week_monthly  = df_report_prev_week  
+df_report_prev_week_monthly.columns.values[3:] = list(map(get_week_num, list(df_report_prev_week_monthly.columns)[3:]))     
+    
+# группируем таблицы по колонкам, относящися к одному месяцу, получая сумму по месяцам
+df_report_current_week_monthly = df_report_current_week_monthly.groupby(df_report_current_week_monthly.columns, axis=1).sum()     
+df_report_prev_week_monthly = df_report_prev_week_monthly.groupby(df_report_prev_week_monthly.columns, axis=1).sum()    
+
+df_report_current_week_monthly.columns.values[:-3] = list(map(lambda x: x +'_текущ', list(df_report_current_week_monthly.columns)[:-3]))
+df_report_prev_week_monthly.columns.values[:-3] = list(map(lambda x: x +'_prev', list(df_report_prev_week_monthly.columns)[:-3]))
+
+
+#меняем колонки местами
+cols_to_order = ['MPS Category', 'Location', 'Product']
+new_columns = cols_to_order + (df_report_current_week_monthly.columns.drop(cols_to_order).tolist())
+df_report_current_week_monthly = df_report_current_week_monthly[new_columns]    
+
+#меняем колонки местами
+cols_to_order = ['MPS Category', 'Location', 'Product']
+new_columns = cols_to_order + (df_report_prev_week_monthly.columns.drop(cols_to_order).tolist())
+df_report_prev_week_monthly = df_report_prev_week_monthly[new_columns]    
+
+
+
+
+
+ ############################################################################################  
+    
+#меняем навзания колонок, ставляя только номер недели и признак текущий/предыдущий    
 df_report_current_week.columns.values[3:] = list(map(get_week_num_cur, list(df_report_current_week.columns)[3:])) 
 df_report_prev_week.columns.values[3:] = list(map(get_week_num_prev, list(df_report_prev_week.columns)[3:]))
+
+
+
+
+
+
+
+
+
+
+
+# инициализирем файл, в который будут выгружаться данные
+writer = pd.ExcelWriter('C:/Users/' +sys_user +'/python_SAP_scripting/Current_vs_Previous_w' + str(current_week_number)+'.xlsx', engine='xlsxwriter')
+workbook  = writer.book
+
 
 
 
@@ -93,8 +152,160 @@ df_report_final = df_report_current_week.iloc[:, :3]
 for i in range (3, df_report_current_week.shape[1]):
     frames = [df_report_final, df_report_current_week.iloc[:, [i]], df_report_prev_week.iloc[:, [i]]]
     df_report_final= pd.concat( frames, axis =1)
-    df_report_final ['Difference %' + str(i)] =   (df_report_final.iloc[:,-2]-df_report_final.iloc[:,-1])/df_report_final.iloc[:,-1]
+    df_report_final ['Difference %' + str(i)] =   (df_report_final.iloc[:,-2]-df_report_final.iloc[:,-1])/df_report_final.iloc[:,-1]*100
+    
+    df_report_final ['Difference %' + str(i)] = df_report_final ['Difference %' + str(i)].fillna(0)
+    
+    
+    
+    # форматирование
+    df_report_final.to_excel(writer, sheet_name='Sheet1', index=False, float_format = "%0.1f")
+    worksheet = writer.sheets['Sheet1']
+    # worksheetNE = workbook.add_worksheet('Northeast Region')
     
 
+    for j in range(2, df_report_final.shape[0]+1):
+
+
+           
+               
+  
+        # инициализируем ячейку, к которой будет применено форматирование, получаем значение формата "А1"
+        # каждый раз необходимо формитаровть последнюю добавленную к табиле колонку ('Difference %')
+                range_df = xlsxwriter.utility.xl_col_to_name(df_report_final.shape[1]-1).upper()+str(j)
+                
+
+
+            
+
+                worksheet.conditional_format(range_df, {'type': 'no_errors',
+                                                    'format': format1})
+                   
+                
+                worksheet.conditional_format(range_df, {'type': 'cell',
+                                                    'criteria': '>',
+                                                    'value':  1.1, # при смещении "горки" на 1 колонку  увеличить вычитаемое на 1
+                                                    'format': format2})    
+        
+
+# worksheet.conditional_format(first_row, first_col, last_row, last_col,
+#                              {'type': 'blanks',
+#                              'format': abc})
+# worksheet.conditional_format(first_row, first_col, last_row, last_col,
+#                              {'type': 'no_blanks',
+#                              'format':    efg})    
+
+
+writer.save()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# инициализирем файл, в который будут выгружаться данные
+writer = pd.ExcelWriter('C:/Users/' +sys_user +'/python_SAP_scripting/Current_vs_Previous_w_monthly' + str(current_week_number)+'.xlsx', engine='xlsxwriter')
+workbook  = writer.book
+
+
+# задаем форматы условного форматирования    
+format1 = workbook.add_format({'bg_color': '#ACAAAA',
+                                    'font_color': '#9C0006',
+                                    'border':1
+                                    })
+            
+        
+format2 = workbook.add_format({'bg_color': '#3CCA3E',
+                                        'font_color': '#9C0006',
+                                        'border':1
+                                        })
+
+
+
+
+
+df_report_final_monthly = df_report_current_week_monthly.iloc[:, :3]
+
+for i in range (3, df_report_current_week_monthly.shape[1]):
+    frames = [df_report_final_monthly, df_report_current_week_monthly.iloc[:, [i]], df_report_prev_week_monthly.iloc[:, [i]]]
+    df_report_final_monthly= pd.concat( frames, axis =1)
+    df_report_final_monthly ['Difference %' + str(i)] =   (df_report_final_monthly.iloc[:,-2]-df_report_final_monthly.iloc[:,-1])/df_report_final_monthly.iloc[:,-1]*100
+    
+    df_report_final_monthly ['Difference %' + str(i)] = df_report_final_monthly ['Difference %' + str(i)].fillna(0)
+    
+    
+    
+    # форматирование
+    df_report_final_monthly.to_excel(writer, sheet_name='Sheet1', index=False, float_format = "%0.1f")
+    worksheet = writer.sheets['Sheet1']
+    # worksheetNE = workbook.add_worksheet('Northeast Region')
     
 
+    for j in range(2, df_report_final.shape[0]+1):
+
+
+           
+               
+  
+        # инициализируем ячейку, к которой будет применено форматирование, получаем значение формата "А1"
+        # каждый раз необходимо формитаровть последнюю добавленную к табиле колонку ('Difference %')
+                range_df = xlsxwriter.utility.xl_col_to_name(df_report_final_monthly.shape[1]-1).upper()+str(j)
+                
+
+
+            
+
+                worksheet.conditional_format(range_df, {'type': 'no_errors',
+                                                    'format': format1})
+                   
+                
+                worksheet.conditional_format(range_df, {'type': 'cell',
+                                                    'criteria': '>',
+                                                    'value':  1.1, # при смещении "горки" на 1 колонку  увеличить вычитаемое на 1
+                                                    'format': format2})    
+        
+
+# worksheet.conditional_format(first_row, first_col, last_row, last_col,
+#                              {'type': 'blanks',
+#                              'format': abc})
+# worksheet.conditional_format(first_row, first_col, last_row, last_col,
+#                              {'type': 'no_blanks',
+#                              'format':    efg})    
+
+
+writer.save()
