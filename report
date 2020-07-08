@@ -5,15 +5,18 @@ import datetime
 from datetime import datetime
 from datetime import timedelta, date
 import xlsxwriter
-
-# скачиваем справочник- список интересующих кодов
-df_all_codes = pd.read_csv('C:/Users/Maksim.Smirnov/OneDrive - Unilever/Documents/Проекты/UNICA/codes_UNICA.csv', header = None, names = ['Product'])
-
-#df_all_codes['Product'] = df_all_codes['Product'].apply(str)
+import pickle
+from pathlib import Path
 
 sys_user = getpass.getuser()  
-# путь, где будет лежать файл-справочник с позициями
+
+# путь, где будут лежать выгруженные отчеты
 path =  r"C:\Users" + "\\ ".strip() + sys_user + "\\ ".strip() + "python_SAP_scripting" + "\\ ".strip()+ "ZRGSNP_009" + "\\ ".strip()
+
+
+# скачиваем справочник- список интересующих кодов
+df_all_codes = pd.read_csv(r"C:\Users" + "\\ ".strip() + sys_user + "\\ ".strip() + "python_SAP_scripting" + "\\ ".strip() + 'codes_UNICA.csv', header = None, names = ['Product'])
+
 
 
 # создаем переменные с номерами текущей и предыдущей недели
@@ -23,15 +26,74 @@ prev_week_number = (date.today() - timedelta(days=7)).isocalendar()[1]
 
 
  
-# загружаем файл c данными за текущую неделю
-df_report_current = pd.read_excel(path + "w" +str(current_week_number)+ '_ZRGSNP_009.xls') #
+# загружаем файл c данными за текущую неделю по заводу '3903' и '3906'
+df_report_current = pd.read_excel(path + "w" +str(current_week_number)+ '_' + '3903_3906_ZRGSNP_009.xlsx') 
 
+df_report_current_3903 =df_report_current[df_report_current['Location']== 3903]
+
+df_report_current_3906 =df_report_current[df_report_current['Location']== 3906]
+
+# создаем мультинидекс из колонок, не являющихся цифровыми данными по недельному потреблению 
+df_report_current_3903 = df_report_current_3903.set_index(['MPS Category',  'Product', 'Product Short Description', 'Key Figure/Week'])
+df_report_current_3906 = df_report_current_3906.set_index(['MPS Category',  'Product', 'Product Short Description', 'Key Figure/Week'])
+
+# удаляем ненужные колонки
+df_report_current_3903 = df_report_current_3903.iloc[:, 7:]
+df_report_current_3906 = df_report_current_3906.iloc[:, 7:]
+
+
+# складываем соответствующие колонки для 2-х таблиц
+df_report_current = df_report_current_3903.add(df_report_current_3906, fill_value=0)
+
+# возвращаем колонкии, которые вошли в индекс
+df_report_current =  df_report_current.reset_index()
+
+
+
+
+
+
+# составляем список недель, попавших в отчет
 list_of_weeks_current_report =[i for i in df_report_current.columns.tolist() if '.2' in i]
 
 
+######################################################################
+# загружаем файл c данными за предыдущую неделю по заводу '3903' и '3906'
+df_report_previous = pd.read_excel(path + "w" +str(prev_week_number)+ '_' + '3903_3906_ZRGSNP_009.xlsx') 
 
-# загружаем файл c данными за предыдущую неделю
-df_report_previous = pd.read_excel(path + "w" +str(prev_week_number)+ '_ZRGSNP_009.xls') #
+
+
+# разбиваем общую таблицу на 2 на сонвое номера завода. Можно было написать группировку, но этот код уже был написан под 2 отдельные выгрузки.
+# быстрее было ничего не менять
+df_report_previous_3903 =df_report_previous[df_report_previous['Location']== 3903]
+
+df_report_previous_3906 =df_report_previous[df_report_previous['Location']== 3906]
+
+# создаем мультинидекс из колонок, не являющихся цифровыми данными по недельному потреблению 
+df_report_previous_3903 = df_report_previous_3903.set_index(['MPS Category',  'Product', 'Product Short Description', 'Key Figure/Week'])
+df_report_previous_3906 = df_report_previous_3906.set_index(['MPS Category',  'Product', 'Product Short Description', 'Key Figure/Week'])
+
+# удаляем ненужные колонки
+df_report_previous_3903 = df_report_previous_3903.iloc[:, 7:]
+df_report_previous_3906 = df_report_previous_3906.iloc[:, 7:]
+
+
+# складываем соответствующие колонки и строки для 2-х таблиц
+df_report_previous = df_report_previous_3903.add(df_report_previous_3906, fill_value=0)
+
+# возвращаем колонкии, которые вошли в индекс
+df_report_previous =  df_report_previous.reset_index()
+
+
+
+
+
+
+
+
+
+
+
 list_of_weeks_prev_report =[i for i in df_report_previous.columns.tolist() if '.2' in i]
 
 
@@ -60,7 +122,7 @@ def make_full_report (report, df_all_codes, df_list_of_weeks):
     df_report_all_weeks_codes['Product'] = df_report_all_weeks_codes['Product'].astype(int)
 
     #меняем колонки местами
-    cols_to_order = ['MPS Category', 'Location', 'Product']
+    cols_to_order = ['MPS Category', 'Product', 'Product Short Description']
     new_columns = cols_to_order + (df_report_all_weeks_codes.columns.drop(cols_to_order).tolist())
     df_report_all_weeks_codes = df_report_all_weeks_codes[new_columns]    
 
@@ -95,11 +157,14 @@ def get_week_num(x):
     
 ##############################################################################################
 # делаем заготовку для помесячного отчета на основе текущей версии  
-df_report_current_week_monthly  = df_report_current_week  
+# Простое создание копии объекта при водит к тому,что изменяя копию, менятеся оригинал df_report_current_week_monthly  = df_report_current_week.copy(). 
+# Приходится создавать через pickle.dumps  
+df_report_current_week_monthly= pickle.loads(pickle.dumps(df_report_current_week))
 df_report_current_week_monthly.columns.values[3:] = list(map(get_week_num, list(df_report_current_week_monthly.columns)[3:]))     
 
 # делаем заготовку для помесячного отчета на основе предыдущей версии     
-df_report_prev_week_monthly  = df_report_prev_week  
+# df_report_prev_week_monthly  = df_report_prev_week.copy()  
+df_report_prev_week_monthly= pickle.loads(pickle.dumps(df_report_prev_week))
 df_report_prev_week_monthly.columns.values[3:] = list(map(get_week_num, list(df_report_prev_week_monthly.columns)[3:]))     
     
 # группируем таблицы по колонкам, относящися к одному месяцу, получая сумму по месяцам
@@ -111,12 +176,12 @@ df_report_prev_week_monthly.columns.values[:-3] = list(map(lambda x: x +'_prev',
 
 
 #меняем колонки местами
-cols_to_order = ['MPS Category', 'Location', 'Product']
+cols_to_order = ['MPS Category', 'Product', 'Product Short Description']
 new_columns = cols_to_order + (df_report_current_week_monthly.columns.drop(cols_to_order).tolist())
 df_report_current_week_monthly = df_report_current_week_monthly[new_columns]    
 
 #меняем колонки местами
-cols_to_order = ['MPS Category', 'Location', 'Product']
+cols_to_order = ['MPS Category', 'Product', 'Product Short Description']
 new_columns = cols_to_order + (df_report_prev_week_monthly.columns.drop(cols_to_order).tolist())
 df_report_prev_week_monthly = df_report_prev_week_monthly[new_columns]    
 
@@ -127,8 +192,8 @@ df_report_prev_week_monthly = df_report_prev_week_monthly[new_columns]
  ############################################################################################  
     
 #меняем навзания колонок, ставляя только номер недели и признак текущий/предыдущий    
-df_report_current_week.columns.values[3:] = list(map(get_week_num_cur, list(df_report_current_week.columns)[3:])) 
-df_report_prev_week.columns.values[3:] = list(map(get_week_num_prev, list(df_report_prev_week.columns)[3:]))
+df_report_current_week.columns.values[4:] = list(map(get_week_num_cur, list(df_report_current_week.columns)[4:])) 
+df_report_prev_week.columns.values[4:] = list(map(get_week_num_prev, list(df_report_prev_week.columns)[4:]))
 
 
 
@@ -137,66 +202,91 @@ df_report_prev_week.columns.values[3:] = list(map(get_week_num_prev, list(df_rep
 
 
 
-
+# создаем директорию для сохранения отчетов, если ее еще нет
+Path('C:/Users/' +sys_user +'/python_SAP_scripting/UNICA').mkdir(parents=True, exist_ok=True)
+            
 
 
 # инициализирем файл, в который будут выгружаться данные
-writer = pd.ExcelWriter('C:/Users/' +sys_user +'/python_SAP_scripting/Current_vs_Previous_w' + str(current_week_number)+'.xlsx', engine='xlsxwriter')
+writer = pd.ExcelWriter('C:/Users/' +sys_user +'/python_SAP_scripting/UNICA/Current_vs_Previous_UNICA_w' + str(current_week_number)+'.xlsx', engine='xlsxwriter')
 workbook  = writer.book
 
+# задаем форматы условного форматирования    
+format1 = workbook.add_format({'bg_color': '#EA1CC8',
+                                    'font_color': '#060606',
+                                    'border':1
+                                    })
+            
+        
+format2 = workbook.add_format({'bg_color': '#6DEA1C',
+                                        'font_color': '#060606',
+                                        'border':1
+                                        })
 
+format3 =  workbook.add_format({'bg_color': '#F9EB43',
+                                        'font_color': '#060606',
+                                        'border':1
+                                        }) 
 
 
 df_report_final = df_report_current_week.iloc[:, :3]
 
-for i in range (3, df_report_current_week.shape[1]):
+
+for i in range (4, df_report_current_week.shape[1]):
     frames = [df_report_final, df_report_current_week.iloc[:, [i]], df_report_prev_week.iloc[:, [i]]]
     df_report_final= pd.concat( frames, axis =1)
-    df_report_final ['Difference %' + str(i)] =   (df_report_final.iloc[:,-2]-df_report_final.iloc[:,-1])/df_report_final.iloc[:,-1]*100
+    # номер недели в качестве суффикса
+    weeek_number_id =list(df_report_final.columns)[len(list(df_report_final.columns))-1].split('_')[0]
     
-    df_report_final ['Difference %' + str(i)] = df_report_final ['Difference %' + str(i)].fillna(0)
+    df_report_final ['Difference %_' + weeek_number_id] =   (df_report_final.iloc[:,-2]-df_report_final.iloc[:,-1])/df_report_final.iloc[:,-1]*100
     
+    df_report_final ['Difference %_' + weeek_number_id] = df_report_final ['Difference %_' + weeek_number_id].fillna(0)
+    
+    #удаляем строки, которые есть в списке-справочнике позиций, который ведет менеджер, но нет в выгрузке из SAP
+    df_report_final  = df_report_final [df_report_final['Product Short Description'].notna()]
     
     
     # форматирование
-    df_report_final.to_excel(writer, sheet_name='Sheet1', index=False, float_format = "%0.1f")
-    worksheet = writer.sheets['Sheet1']
+    df_report_final.to_excel(writer, sheet_name='Report by week', index=False, float_format = "%0.1f")
+    worksheet = writer.sheets['Report by week']
     # worksheetNE = workbook.add_worksheet('Northeast Region')
     
 
-    for j in range(2, df_report_final.shape[0]+1):
+    for j in range(2, df_report_final.shape[0]+2):
 
 
            
                
   
-        # инициализируем ячейку, к которой будет применено форматирование, получаем значение формата "А1"
-        # каждый раз необходимо формитаровть последнюю добавленную к табиле колонку ('Difference %')
+        # каждый раз необходимо формитаровть последнюю добавленную к таблицее колонку ('Difference %'). 
+        # используется функция библиотеки для конвертации номера колокни в буквенное значение
                 range_df = xlsxwriter.utility.xl_col_to_name(df_report_final.shape[1]-1).upper()+str(j)
                 
 
 
             
 
-                worksheet.conditional_format(range_df, {'type': 'no_errors',
-                                                    'format': format1})
-                   
+                worksheet.conditional_format(range_df, {'type': 'cell',
+                                                        'criteria': 'between',
+                                                         'minimum':  -10,
+                                                         'maximum':  10,
+                                                        'format': format3})
+                
+
                 
                 worksheet.conditional_format(range_df, {'type': 'cell',
-                                                    'criteria': '>',
-                                                    'value':  1.1, # при смещении "горки" на 1 колонку  увеличить вычитаемое на 1
-                                                    'format': format2})    
+                                                    'criteria': '>=',
+                                                    'value':  10, 
+                                                    'format': format2})   
+                
+                worksheet.conditional_format(range_df, {'type': 'cell',
+                                                    'criteria': '<=',
+                                                    'value':  -10, 
+                                                    'format': format1}) 
+                
+                
         
 
-# worksheet.conditional_format(first_row, first_col, last_row, last_col,
-#                              {'type': 'blanks',
-#                              'format': abc})
-# worksheet.conditional_format(first_row, first_col, last_row, last_col,
-#                              {'type': 'no_blanks',
-#                              'format':    efg})    
-
-
-writer.save()
 
 
 
@@ -220,85 +310,69 @@ writer.save()
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# инициализирем файл, в который будут выгружаться данные
-writer = pd.ExcelWriter('C:/Users/' +sys_user +'/python_SAP_scripting/Current_vs_Previous_w_monthly' + str(current_week_number)+'.xlsx', engine='xlsxwriter')
-workbook  = writer.book
-
-
-# задаем форматы условного форматирования    
-format1 = workbook.add_format({'bg_color': '#ACAAAA',
-                                    'font_color': '#9C0006',
-                                    'border':1
-                                    })
-            
-        
-format2 = workbook.add_format({'bg_color': '#3CCA3E',
-                                        'font_color': '#9C0006',
-                                        'border':1
-                                        })
-
-
-
+# создание таблицы, где понедельные планы сгруппированы по месяцам
 
 
 df_report_final_monthly = df_report_current_week_monthly.iloc[:, :3]
+#удаляем строки, которые есть в списке-справочнике позиций, который ведет менеджер, но нет в выгрузке из SAP
+df_report_final_monthly= df_report_final_monthly [df_report_final_monthly['Product Short Description']!=0]
 
 for i in range (3, df_report_current_week_monthly.shape[1]):
     frames = [df_report_final_monthly, df_report_current_week_monthly.iloc[:, [i]], df_report_prev_week_monthly.iloc[:, [i]]]
     df_report_final_monthly= pd.concat( frames, axis =1)
-    df_report_final_monthly ['Difference %' + str(i)] =   (df_report_final_monthly.iloc[:,-2]-df_report_final_monthly.iloc[:,-1])/df_report_final_monthly.iloc[:,-1]*100
     
-    df_report_final_monthly ['Difference %' + str(i)] = df_report_final_monthly ['Difference %' + str(i)].fillna(0)
+        # номер недели в качестве суффикса
+    weeek_number_id =list(df_report_final_monthly.columns)[len(list(df_report_final_monthly.columns))-1].split('_')[0]
+    
+    df_report_final_monthly ['Difference %_' + weeek_number_id] =   (df_report_final_monthly.iloc[:,-2]-df_report_final_monthly.iloc[:,-1])/df_report_final_monthly.iloc[:,-1]*100
+    
+    df_report_final_monthly ['Difference %_' + weeek_number_id] = df_report_final_monthly ['Difference %_' + weeek_number_id].fillna(0)
+
+    #удаляем строки, которые есть в списке-справочнике позиций, который ведет менеджер, но нет в выгрузке из SAP
+    df_report_final_monthly  = df_report_final_monthly [df_report_final_monthly['Product Short Description'].notna()]
+        
     
     
     
     # форматирование
-    df_report_final_monthly.to_excel(writer, sheet_name='Sheet1', index=False, float_format = "%0.1f")
-    worksheet = writer.sheets['Sheet1']
-    # worksheetNE = workbook.add_worksheet('Northeast Region')
+    df_report_final_monthly.to_excel(writer, sheet_name='Report by month', index=False, float_format = "%0.1f")
+    worksheet = writer.sheets['Report by month']
+
     
 
-    for j in range(2, df_report_final.shape[0]+1):
+    for j in range(2, df_report_final_monthly.shape[0]+2):
 
 
            
                
   
-        # инициализируем ячейку, к которой будет применено форматирование, получаем значение формата "А1"
-        # каждый раз необходимо формитаровть последнюю добавленную к табиле колонку ('Difference %')
+       
+        # каждый раз необходимо формитаровть последнюю добавленную к таблицее колонку ('Difference %'). 
+        # используется функция библиотеки для конвертации номера колокни в буквенное значение
                 range_df = xlsxwriter.utility.xl_col_to_name(df_report_final_monthly.shape[1]-1).upper()+str(j)
                 
 
 
             
 
-                worksheet.conditional_format(range_df, {'type': 'no_errors',
-                                                    'format': format1})
-                   
+
+                worksheet.conditional_format(range_df, {'type': 'cell',
+                                                        'criteria': 'between',
+                                                         'minimum':  -10,
+                                                         'maximum':  10,
+                                                        'format': format1})
+                
+
                 
                 worksheet.conditional_format(range_df, {'type': 'cell',
-                                                    'criteria': '>',
-                                                    'value':  1.1, # при смещении "горки" на 1 колонку  увеличить вычитаемое на 1
-                                                    'format': format2})    
-        
+                                                    'criteria': '>=',
+                                                    'value':  10, 
+                                                    'format': format2})   
+                
+                worksheet.conditional_format(range_df, {'type': 'cell',
+                                                    'criteria': '<=',
+                                                    'value':  -10, 
+                                                    'format': format3}) 
 
 # worksheet.conditional_format(first_row, first_col, last_row, last_col,
 #                              {'type': 'blanks',
